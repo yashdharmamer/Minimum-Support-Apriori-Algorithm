@@ -1,6 +1,6 @@
 import argparse
 import re
-import itertools
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('filename')
@@ -8,6 +8,45 @@ parser.add_argument('parameter')
 parser.add_argument('output')
 args = parser.parse_args()
 
+
+def filehandler():
+    # read input file
+    with open(args.filename) as f:
+        inp = f.readlines()
+        f.close()
+    transac = []
+    for line in inp:
+        pattern = re.findall(r'{.*}', line)
+        transac.extend(pattern)
+    # read parameter file
+    with open(args.parameter) as p:
+        para = p.readlines()
+        p.close()
+    MS_val = {}
+    cant_be = []
+    must_have = []
+    for line in para:
+        if line.startswith('MIS'):  # MIS values
+            MS_pat = re.search(r'.*\((\w*)\) = (\d*\.\d*)', line)
+            MS_val[MS_pat.group(1)] = MS_pat.group(2)
+        elif line.startswith('SDC'):    #support difference constraint
+            SDC_pat = re.findall(r'\d\.\d', line)
+            SDC_val = float(SDC_pat[0])
+        elif line.startswith('can'):    #cannot be together
+            cant_pat = re.findall("{(\d+(,*\s*\d+)*)}", line)
+            for x in cant_pat:
+                items = re.findall(r"\d+", x[0])
+                items = [str(i) for i in items]
+                cant_be.append(items)
+        elif line.startswith('must'):   #must have
+            must_have = re.findall(r'\d+', line)
+         
+    return transac, MS_val, SDC_val, cant_be, must_have
+transac, MS_val, SDC_val, cant_be, must_have = filehandler()
+
+
+
+# calculate frequent-2 itemsets
 def cand2gen(L, SDC_val):
     C = []
     for index, item in enumerate(L):
@@ -18,14 +57,7 @@ def cand2gen(L, SDC_val):
                     C.append([item, L[j]])
     return C
 
-def subsets(itemset):
-    subset = []
-    for i in itemset:
-        j = []
-        p = itemset.index(i)
-        j = itemset[:p]+itemset[p+1:]
-        subset.append(j)
-    return subset
+# calculate frequent-n itemsets
 def candngen(F, SDC_val):
     Ck = []
     for i, item in enumerate(F):
@@ -36,20 +68,26 @@ def candngen(F, SDC_val):
                     C = []
                     C.extend(item)
                     C.append(initem[-1])
-                    # print(C)
-                    Ck.append(C)
+                    Ck.append(C)    # join step
                     
     for item in Ck:
             c = Ck.index(item)
             subset = []
-            subset = subsets(item)
+            for i in item:
+                gensubset = []
+                comb = item.index(i)
+                gensubset = item[:comb]+item[comb+1:]
+                subset.append(gensubset)
+            
             for j in subset:
                 if item[0] in j or MS_val[item[0]]==MS_val[item[1]]:
                     if j not in F:
-                        del Ck[c]
+                        del Ck[c]   #prune step
                         break   
     return Ck
 
+
+# apply must have and cannot be together conditions
 def with_conditions(F, must_have, cant_be):
     F1 = {}
     for k in F:
@@ -65,86 +103,54 @@ def with_conditions(F, must_have, cant_be):
                     F1[k].append(f)
     return F1
 
+
+# print results
 def print_in_format(F):
-    with open(args.output, 'w+') as o:
+    with open(args.output, 'w+') as output:
         for item in F:
-            o.write('Frequent ' + str(item) + '-itemsets\n')
+            output.write('Frequent ' + str(item) + '-itemsets\n')
             for initem in F[item]:
                 if item == 1:
-                    o.write('\n    ' + str(count_sup[initem[0]]) + ' : {' + ','.join(set(initem)) + '}')
+                    output.write('\n    ' + str(count_sup[initem[0]]) + ' : {' + ','.join(set(initem)) + '}')
                 else:
                     tail_count = 0
                     for c in cand[item]:
                         if set(c) == set(initem):
                             count = count_sup.get(tuple(c))
-                    if item == 2:
+                    if item == 2:   # tailcout generation
                         tail_count = count_sup[initem[item-1]]
                     else:
                         for c in cand[item-1]:
                             if set(c) == set(initem[1:]):
                                 tail_count = count_sup.get(tuple(c))
-                    o.write("\n    " + str(count) + " : " + '{' + ', '.join(initem) + '}')
-                    o.write("\nTailcount = " + str(tail_count))
-            o.write("\n\n    Total number of frequent "+ str(item) + "-itemsets = " + str(len(F[item])) + "\n\n\n")
+                    output.write("\n    " + str(count) + " : " + '{' + ', '.join(initem) + '}')
+                    output.write("\nTailcount = " + str(tail_count))
+            output.write("\n\n    Total number of frequent "+ str(item) + "-itemsets = " + str(len(F[item])) + "\n\n\n")
 
-def filehandler():
-
-    with open(args.filename) as f:
-        inp = f.readlines()
-        f.close()
-    transac = []
-    for line in inp:
-        pattern = re.findall(r'{.*}', line)
-        transac.extend(pattern)
-    with open(args.parameter) as p:
-        para = p.readlines()
-        p.close()
-    MS_val = {}
-    cant_be = []
-    must_have = []
-    for line in para:
-        if line.startswith('MIS'):
-            MS_pat = re.search(r'.*\((\w*)\) = (\d*\.\d*)', line)
-            MS_val[MS_pat.group(1)] = MS_pat.group(2)
-        elif line.startswith('SDC'):
-            SDC_pat = re.findall(r'\d\.\d', line)
-            SDC_val = float(SDC_pat[0])
-        elif line.startswith('can'):
-            group = re.findall("{(\d+(,*\s*\d+)*)}", line)
-            for g in group:
-                items = re.findall(r"\d+", g[0])
-                items = [str(i) for i in items]
-                cant_be.append(items)
-        elif line.startswith('must'):
-            must_have = re.findall(r'\d+', line)
-         
-    return transac, MS_val, SDC_val, cant_be, must_have
 
 count_sup = {}     # dict to calculate support count of each item
-translist = []
-L = []
-koko = []
-F1 = []
-sorted_MIS = []
-C2 = []
-Freq = {}
-cand = {}
-k = 2
-transac, MS_val, SDC_val, cant_be, must_have = filehandler()
-transac = [x.replace("{", "").replace("}", "").replace(" ", "") for x in transac]
-n = len(transac)
+translist = []     # list to count item occurances in transactions  
+L = []             # first pass over transactions
+koko = []          
+F1 = []            # frequent-1 itemsets
+sorted_MIS = []    # items sorted by minimum support
+Freq = {}          # dict of frequent itemsets
+cand = {}          # dict of candidate itemsets
+n = len(transac)   # number of transactions
 
+transac = [x.replace("{", "").replace("}", "").replace(" ", "") for x in transac]
 for item in transac:
     translist.append(item.split(","))
 
+# calsulating support of all items
 for item in translist:
     for minitem in item:
         count_sup[minitem] = count_sup.get(minitem, 0) + 1
 
+# smallest MIS value
 for item, mins in sorted(MS_val.items(), key=lambda x: (x[1], int(x[0]))):
     sorted_MIS.append(item)
-
-minimis = MS_val[sorted_MIS[0]]
+minimis = MS_val[sorted_MIS[0]] 
 
 for item in sorted_MIS:
     if item in [j for i in translist for j in i]:
@@ -156,8 +162,11 @@ for item in koko:
 
 for item in L:
     if count_sup[item]/n > float(MS_val[item]):
-        F1.append([item])  # Frequent set 1 generated
+        F1.append([item])  # frequent-1 itemsets generated
 Freq[1] = F1
+
+
+k = 2
 while k >= 2:
     if not Freq[k - 1]:
         break
@@ -180,6 +189,6 @@ while k >= 2:
     Freq[k] = F
     k += 1
 
-# print(Freq)
+
 Fb = with_conditions(Freq, must_have, cant_be)
 print_in_format(Fb)
